@@ -7,11 +7,8 @@ HOW TO INSTALL:
     pip install spacy
     python -m spacy download en_core_web_sm
 
-HOW TO RUN (test mode, no Minecraft needed):
-    python minecraft_bot.py
-
-HOW TO RUN (connected to Java/Minecraft):
-    python minecraft_bot.py --java
+HOW TO RUN (socket server for Node bot):
+    python NLP_part.py
 
 HOW TO ADD A NEW COMMAND:
     Scroll to the  ═══ COMMANDS ═══  section below.
@@ -23,13 +20,9 @@ import re
 import sys
 import socket
 import json
-import argparse
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 1 — Load the spaCy NLP model
-#
-# spaCy reads sentences and understands grammar (nouns, verbs, names, numbers).
-# We use the small English model "en_core_web_sm".
 # ─────────────────────────────────────────────────────────────────────────────
 try:
     import spacy
@@ -42,24 +35,18 @@ except OSError:
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 2 — COMMANDS
 #
-# This is the ONLY section you need to edit when adding new commands.
+# Each command needs:
+#   "triggers" : words/phrases that activate this command
+#   "params"   : what to extract from the sentence
+#   "build"    : function that turns params → Minecraft command string
 #
-# Each command is a dictionary with these keys:
-#
-#   "triggers"  : list of words/phrases the player might say to trigger it
-#   "params"    : what information to extract from the sentence
-#                 each param has:
-#                   "extract" → what to look for  (see extractor list below)
-#                   "default" → fallback value if nothing is found
-#   "build"     : a function that turns extracted params into a Minecraft command
-#
-# ─── Available extractors ────────────────────────────────────────────────────
-#   "item"      → finds a Minecraft item  (e.g. "sword" → "diamond_sword")
-#   "target"    → finds a player/target   (e.g. "me" → "@p", "everyone" → "@a")
-#   "number"    → finds a number          (e.g. "five" → 5,  "10" → 10)
-#   "mob"       → finds a mob name        (e.g. "zombie", "creeper")
-#   "direction" → finds a direction       (e.g. "north", "up", "forward")
-#   "message"   → captures remaining text as a chat message
+# Available extractors:
+#   "item"      → Minecraft item name  (e.g. "sword" → "diamond_sword")
+#   "target"    → player target        (e.g. "me" → "@p", "everyone" → "@a")
+#   "number"    → a number             (e.g. "five" → 5, "10" → 10)
+#   "mob"       → mob name             (e.g. "zombie", "creeper")
+#   "direction" → compass direction    (e.g. "north", "up", "forward")
+#   "message"   → remaining text       (used for /say)
 # ─────────────────────────────────────────────────────────────────────────────
 
 COMMANDS = {
@@ -77,7 +64,7 @@ COMMANDS = {
     },
 
     # ── JUMP ──────────────────────────────────────────────────────────────────
-    # "jump"  →  /bot jump 1
+    # "jump 3 times"  →  /bot jump 3
     "jump": {
         "triggers": ["jump", "leap", "hop", "bounce", "spring up"],
         "params": {
@@ -87,23 +74,21 @@ COMMANDS = {
     },
 
     # ── FOLLOW ────────────────────────────────────────────────────────────────
-    # "follow me"  →  /bot follow @p
+    # "follow me"  →  /bot follow
     "follow": {
         "triggers": ["follow", "come to", "come here", "trail", "track", "chase"],
-        "params": {
-            "target": {"extract": "target", "default": "@p"},
-        },
-        "build": lambda p: f"/bot follow {p['target']}",
+        "params": {},
+        "build": lambda p: "/bot follow",
     },
 
     # ── ATTACK ────────────────────────────────────────────────────────────────
-    # "attack the zombie"  →  /bot attack @e[type=zombie,limit=1,sort=nearest]
+    # "attack the zombie"  →  /bot attack type=zombie
     "attack": {
         "triggers": ["attack", "kill", "fight", "hit", "strike", "slay", "destroy", "eliminate"],
         "params": {
             "mob": {"extract": "mob", "default": "zombie"},
         },
-        "build": lambda p: f"/bot attack @e[type={p['mob']},limit=1,sort=nearest]",
+        "build": lambda p: f"/bot attack type={p['mob']}",
     },
 
     # ── COLLECT ───────────────────────────────────────────────────────────────
@@ -117,26 +102,18 @@ COMMANDS = {
         "build": lambda p: f"/bot collect {p['item']} {p['amount']}",
     },
 
-    # ── BUILD ─────────────────────────────────────────────────────────────────
-    # "build a stone wall to the north"  →  /bot build cobblestone north
-    "build": {
-        "triggers": ["build", "place", "construct", "put", "erect", "lay", "set down"],
-        "params": {
-            "block":     {"extract": "item",      "default": "cobblestone"},
-            "direction": {"extract": "direction", "default": "north"},
-        },
-        "build": lambda p: f"/bot build {p['block']} {p['direction']}",
-    },
-
     # ── CRAFT ─────────────────────────────────────────────────────────────────
-    # "craft a pickaxe"  →  /bot craft diamond_pickaxe 1
+    # "craft a pickaxe and drop it"    →  /bot craft diamond_pickaxe 1 drop
+    # "make me a sword and equip it"   →  /bot craft diamond_sword 1 equip
+    # "craft a chest"                  →  /bot craft chest 1 keep
     "craft": {
         "triggers": ["craft", "make", "fabricate", "forge", "craft me", "make me"],
         "params": {
             "item":   {"extract": "item",   "default": "crafting_table"},
             "amount": {"extract": "number", "default": 1},
+            "action": {"extract": "craft_action", "default": "keep"},
         },
-        "build": lambda p: f"/bot craft {p['item']} {p['amount']}",
+        "build": lambda p: f"/bot craft {p['item']} {p['amount']} {p['action']}",
     },
 
     # ── SAY ───────────────────────────────────────────────────────────────────
@@ -179,56 +156,45 @@ COMMANDS = {
 
     # ────────────────────────────────────────────────────────────────────────
     # ↓↓↓  ADD YOUR NEW COMMANDS HERE  ↓↓↓
-    #
-    # Example — an "eat" command:
-    #
-    # "eat": {
-    #     "triggers": ["eat", "feed me", "consume", "nom"],
-    #     "params": {
-    #         "item": {"extract": "item", "default": "bread"},
-    #     },
-    #     "build": lambda p: f"/bot eat {p['item']}",
-    # },
     # ────────────────────────────────────────────────────────────────────────
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 3 — ITEM / MOB DICTIONARIES
-#
-# These map plain English words → official Minecraft names.
-# Add more entries whenever you like.
 # ─────────────────────────────────────────────────────────────────────────────
 
 ITEM_ALIASES = {
     # Weapons & tools
-    "sword": "diamond_sword", "pickaxe": "diamond_pickaxe",
-    "axe": "diamond_axe",     "shovel": "diamond_shovel",
-    "bow": "bow",              "arrow": "arrow",
+    "sword":    "wooden_sword",    "pickaxe":  "wooden_pickaxe",
+    "axe":      "wooden_axe",      "shovel":   "wooden_shovel",
+    "bow":      "bow",              "arrow":    "arrow",
     # Blocks & materials
-    "wood": "oak_log",         "log": "oak_log",
-    "stone": "cobblestone",    "dirt": "dirt",
-    "sand": "sand",            "gravel": "gravel",
-    "glass": "glass",          "wool": "white_wool",
-    "torch": "torch",          "chest": "chest",
-    "door": "oak_door",        "ladder": "ladder",
-    "tnt": "tnt",
+    "wood":     "oak_log",          "log":      "oak_log",
+    "plank":    "oak_planks",       "planks":   "oak_planks",
+    "stone":    "cobblestone",      "dirt":     "dirt",
+    "sand":     "sand",             "gravel":   "gravel",
+    "glass":    "glass",            "wool":     "white_wool",
+    "torch":    "torch",            "chest":    "chest",
+    "door":     "oak_door",         "ladder":   "ladder",
+    "tnt":      "tnt",              "stick":    "stick",
     # Ores & materials
-    "coal": "coal",            "iron": "iron_ingot",
-    "gold": "gold_ingot",      "diamond": "diamond",
-    "emerald": "emerald",      "redstone": "redstone",
+    "coal":     "coal",             "iron":     "iron_ingot",
+    "gold":     "gold_ingot",       "diamond":  "diamond",
+    "emerald":  "emerald",          "redstone": "redstone",
     # Food
-    "food": "bread",           "bread": "bread",
-    "apple": "apple",          "meat": "cooked_beef",
-    "beef": "cooked_beef",     "steak": "cooked_beef",
-    "fish": "cooked_cod",
+    "food":     "bread",            "bread":    "bread",
+    "apple":    "apple",            "meat":     "cooked_beef",
+    "beef":     "cooked_beef",      "steak":    "cooked_beef",
+    "fish":     "cooked_cod",
     # Armour
-    "helmet": "diamond_helmet",         "chestplate": "diamond_chestplate",
-    "leggings": "diamond_leggings",     "boots": "diamond_boots",
+    "helmet":     "diamond_helmet",     "chestplate": "diamond_chestplate",
+    "leggings":   "diamond_leggings",   "boots":      "diamond_boots",
     # Misc
-    "potion": "potion",        "bucket": "bucket",
-    "water": "water_bucket",   "book": "book",
-    "map": "map",              "compass": "compass",
+    "potion":   "potion",           "bucket":   "bucket",
+    "water":    "water_bucket",     "book":     "book",
+    "map":      "map",              "compass":  "compass",
+    "table":    "crafting_table",   "crafting table": "crafting_table",
 }
 
 MOB_NAMES = {
@@ -239,47 +205,53 @@ MOB_NAMES = {
 }
 
 # Words that mean "this player" or "all players"
+# FIX: TARGET_MAP is checked BEFORE spaCy entities to avoid misclassification
 TARGET_MAP = {
-    "me": "@s",  "myself": "@s",  "player": "@p",
-    "everyone": "@a",  "all": "@a",  "all players": "@a",
-    "nearest": "@p",   "random": "@r",
+    "me":       "@p",
+    "myself":   "@p",
+    "player":   "@p",
+    "everyone": "@a",
+    "all":      "@a",
+    "nearest":  "@p",
+    "random":   "@r",
 }
 
-# Words that are filler in "say" sentences — stripped before sending the message
+# Filler words stripped before sending a /say message
 SAY_STOP_WORDS = {"say", "tell", "broadcast", "announce", "shout", "chat", "message", "type"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 4 — EXTRACTORS
-#
-# These functions look inside a parsed sentence and pull out the relevant info.
-# You don't need to edit these unless you want to add a new extractor type.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_item(doc, text):
     """Find a Minecraft item name in the sentence."""
-    for alias, mc_name in ITEM_ALIASES.items():
+    # Check multi-word aliases first (e.g. "crafting table")
+    for alias in sorted(ITEM_ALIASES, key=len, reverse=True):
         if alias in text:
-            return mc_name
+            return ITEM_ALIASES[alias]
     return None
 
 def extract_target(doc, text):
-    """Find who the command is aimed at (player name, @p, @a, etc.)."""
-    # spaCy: check for recognised person names
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            return ent.text
-    # Check our known target words
+    """
+    Find who the command is aimed at.
+    FIX: checks TARGET_MAP first, then falls back to spaCy PERSON entity.
+    This prevents player names like 'Steve' being swapped with NLP noise.
+    """
     for word, selector in TARGET_MAP.items():
         if word in text:
             return selector
-    return "@p"   # default: nearest player
+    # Only use spaCy PERSON if no keyword matched
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            return ent.text
+    return "@p"
 
 def extract_number(doc, text):
     """Find a number (digit or written word) in the sentence."""
     word_nums = {
-        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "one": 1,   "two": 2,    "three": 3, "four": 4,  "five": 5,
+        "six": 6,   "seven": 7,  "eight": 8, "nine": 9,  "ten": 10,
         "twenty": 20, "thirty": 30, "fifty": 50, "hundred": 100,
     }
     for word, num in word_nums.items():
@@ -296,7 +268,7 @@ def extract_mob(doc, text):
     return None
 
 def extract_direction(doc, text):
-    """Find a compass direction or movement direction."""
+    """Find a compass or movement direction."""
     directions = ["north", "south", "east", "west", "up", "down", "forward", "back", "left", "right"]
     for d in directions:
         if d in text:
@@ -304,53 +276,67 @@ def extract_direction(doc, text):
     return None
 
 def extract_message(doc, text):
-    """Return the sentence with trigger words removed — used for /say."""
+    """Return the sentence with trigger words stripped — used for /say."""
     words = [w for w in text.split() if w not in SAY_STOP_WORDS]
     return " ".join(words) if words else text
 
-# Map extractor names (used in COMMANDS above) → actual functions
+# Keywords that signal the player wants the bot to drop the crafted item
+DROP_TRIGGERS  = {"drop", "throw", "toss", "give", "hand", "pass", "leave"}
+# Keywords that signal the player wants the bot to equip the crafted item
+EQUIP_TRIGGERS = {"equip", "wear", "put on", "use", "hold", "wield"}
+
+def extract_craft_action(doc, text):
+    """
+    Detect whether the player wants the bot to drop or equip the crafted item.
+    Examples:
+      "craft a sword and equip it"   → 'equip'
+      "make me a pickaxe, drop it"   → 'drop'
+      "craft a chest"                → 'keep'  (default)
+    """
+    # Check multi-word triggers first
+    for phrase in EQUIP_TRIGGERS:
+        if phrase in text:
+            return "equip"
+    for phrase in DROP_TRIGGERS:
+        if phrase in text:
+            return "drop"
+    return "keep"
+
 EXTRACTORS = {
-    "item":      extract_item,
-    "target":    extract_target,
-    "number":    extract_number,
-    "mob":       extract_mob,
-    "direction": extract_direction,
-    "message":   extract_message,
-    "block":     extract_item,   # blocks use the same extractor as items
+    "item":         extract_item,
+    "target":       extract_target,
+    "number":       extract_number,
+    "mob":          extract_mob,
+    "direction":    extract_direction,
+    "message":      extract_message,
+    "block":        extract_item,
+    "craft_action": extract_craft_action,
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 5 — NLP PIPELINE
-#
-# parse_sentence() is the core function.
-# It takes a plain English sentence and returns a Minecraft command string.
-#
-# Flow:
-#   sentence → spaCy → detect intent → extract params → build command
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_trigger_map():
-    """Build a lookup table: trigger_phrase → command_name."""
     trigger_map = {}
     for cmd_name, cmd in COMMANDS.items():
         for trigger in cmd["triggers"]:
             trigger_map[trigger.lower()] = cmd_name
     return trigger_map
 
-# Build it once at startup
 TRIGGER_MAP = build_trigger_map()
 
 
 def detect_intent(doc, text):
     """
     Find which command the player is asking for.
-    Checks longest triggers first so "pick up" beats "pick".
+    Checks longest triggers first so 'pick up' beats 'pick'.
+    Falls back to lemma matching so 'jumps' → 'jump'.
     """
     for trigger in sorted(TRIGGER_MAP, key=len, reverse=True):
         if trigger in text:
             return TRIGGER_MAP[trigger]
-    # Fallback: try matching lemmas (base word forms), e.g. "jumps" → "jump"
     for token in doc:
         if token.lemma_ in TRIGGER_MAP:
             return TRIGGER_MAP[token.lemma_]
@@ -358,10 +344,6 @@ def detect_intent(doc, text):
 
 
 def extract_params(doc, text, cmd_name):
-    """
-    Extract all parameters defined for this command.
-    Uses the extractor functions above.
-    """
     params = {}
     cmd = COMMANDS[cmd_name]
     for param_name, definition in cmd["params"].items():
@@ -373,9 +355,9 @@ def extract_params(doc, text, cmd_name):
 
 def parse_sentence(sentence):
     """
-    Main function.
+    Main entry point.
     Input:  "give me 5 diamonds"
-    Output: ("/give @p diamond 5", "give")   ← (minecraft_command, intent_name)
+    Output: ("/give @p diamond 5", "give")
             or (None, None) if nothing matched
     """
     text = sentence.strip().lower()
@@ -391,195 +373,44 @@ def parse_sentence(sentence):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 6 — BRIDGE TO JAVA
+# STEP 6 — SOCKET SERVER FOR NODE BOT
 #
-# When running in live mode (--java), commands are sent over a TCP socket.
-# The Java bot server should listen on localhost:25575.
-#
-# Format sent:  { "command": "/give @p diamond 1" }\n
+# Node's index.js connects here on port 25576.
+# Receives:  { "message": "attack the zombie" }
+# Sends:     { "command": "/bot attack type=zombie", "intent": "attack" }
 # ─────────────────────────────────────────────────────────────────────────────
-
-def send_to_java(command, host="localhost", port=25575):
-    try:
-        with socket.create_connection((host, port), timeout=5) as sock:
-            payload = json.dumps({"command": command}) + "\n"
-            sock.sendall(payload.encode("utf-8"))
-            response = sock.recv(1024).decode("utf-8").strip()
-            return response
-    except ConnectionRefusedError:
-        return f"[!] Java server not running on {host}:{port}"
-    except socket.timeout:
-        return "[!] Connection timed out"
-    except Exception as e:
-        return f"[!] Error: {e}"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 7 — TEST SUITE
-#
-# Run with:  python minecraft_bot.py --test
-# Checks that every example sentence maps to the right command.
-# ─────────────────────────────────────────────────────────────────────────────
-
-TEST_CASES = [
-    #  (sentence you type,                 expected command name)
-    ("give me a diamond sword",             "give"),
-    ("give Steve 10 arrows",               "give"),
-    ("jump",                               "jump"),
-    ("jump 3 times",                       "jump"),
-    ("follow me",                          "follow"),
-    ("come to me",                         "follow"),
-    ("attack the zombie",                  "attack"),
-    ("kill all skeletons",                 "attack"),
-    ("collect diamonds",                   "collect"),
-    ("mine 5 coal",                        "collect"),
-    ("build a wall with stone",            "build"),
-    ("place a torch",                      "build"),
-    ("craft a pickaxe",                    "craft"),
-    ("make 5 arrows",                      "craft"),
-    ("say hello everyone",                 "say"),
-    ("broadcast we won",                   "say"),
-    ("summon a creeper",                   "summon"),
-    ("spawn a zombie",                     "summon"),
-    ("teleport to me",                     "teleport"),
-    ("tp to Steve",                        "teleport"),
-    ("stop",                               "stop"),
-    ("halt everything",                    "stop"),
-]
-
-def run_tests():
-    print("\n" + "─" * 55)
-    print(f"  Running {len(TEST_CASES)} tests...")
-    print("─" * 55)
-    passed = failed = 0
-    for sentence, expected in TEST_CASES:
-        command, intent = parse_sentence(sentence)
-        ok = intent == expected
-        status = "✓ PASS" if ok else "✗ FAIL"
-        print(f"  [{status}]  \"{sentence}\"")
-        if ok:
-            print(f"           → {command}")
-            passed += 1
-        else:
-            print(f"           got={intent}  expected={expected}")
-            failed += 1
-        print()
-    print("─" * 55)
-    print(f"  {passed} passed,  {failed} failed  ({len(TEST_CASES)} total)")
-    print("─" * 55 + "\n")
-    return failed == 0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 8 — INTERACTIVE CHAT LOOP
-#
-# Type sentences, get Minecraft commands back.
-# In test mode:  commands are just printed.
-# In Java mode:  commands are sent to the Java bot server over TCP.
-# ─────────────────────────────────────────────────────────────────────────────
-
-def run_chat(java_mode=False, host="localhost", port=25575):
-    print("\n" + "═" * 55)
-    print("  MINECRAFT NLP BOT")
-    mode = f"LIVE → Java on {host}:{port}" if java_mode else "TEST MODE (no Minecraft needed)"
-    print(f"  Mode: {mode}")
-    print("═" * 55)
-    print("  Type a sentence to get a command.")
-    print("  Type  !commands  to list all loaded commands.")
-    print("  Type  !quit      to exit.")
-    print("═" * 55 + "\n")
-
-    while True:
-        try:
-            sentence = input("You: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nBye!")
-            break
-
-        if not sentence:
-            continue
-
-        # Special chat commands
-        if sentence == "!quit":
-            print("Bye!")
-            break
-        if sentence == "!commands":
-            print(f"  Loaded commands: {', '.join(COMMANDS.keys())}\n")
-            continue
-
-        # Parse the sentence
-        command, intent = parse_sentence(sentence)
-
-        if command is None:
-            print(f"  ? Not understood. Try: 'give me a sword', 'follow me', 'attack the zombie'\n")
-            continue
-
-        print(f"  Intent  : {intent}")
-        print(f"  Command : {command}")
-
-        if java_mode:
-            response = send_to_java(command, host, port)
-            print(f"  Java    : {response}")
-        print()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ENTRY POINT
-# ─────────────────────────────────────────────────────────────────────────────
-import sys
-
-if __name__ == "__main__":
-    sentence = " ".join(sys.argv[1:])
-
-    command, intent = parse_sentence(sentence)
-
-    if command:
-        print("Intent :", intent)
-        print("Command:", command)
-    else:
-        print("Not understood")
-
-
-# Enter your command: give amey 10 diamond pickaxe
-# 
-# Intent : give
-# 
-# Command: /give amey 10 diamond pickaxe diamond_pickaxe 10
-# 
-# ───────────────── SOCKET SERVER FOR NODE ─────────────────
-import socket
-import json
 
 HOST = "localhost"
-PORT = 25576   # different from your java port
+PORT = 25576
 
 def start_server():
-    print(f"[NLP] Server running on {HOST}:{PORT}")
+    print(f"[NLP] Server listening on {HOST}:{PORT}")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, PORT))
         server.listen()
 
         while True:
             conn, addr = server.accept()
             with conn:
-                data = conn.recv(1024).decode("utf-8").strip()
-
                 try:
-                    req = json.loads(data)
+                    data = conn.recv(4096).decode("utf-8").strip()
+                    req  = json.loads(data)
                     sentence = req.get("message", "")
 
                     command, intent = parse_sentence(sentence)
-
-                    response = {
-                        "command": command,
-                        "intent": intent
-                    }
+                    response = {"command": command, "intent": intent}
 
                 except Exception as e:
                     response = {"error": str(e)}
 
                 conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENTRY POINT — only one __main__ block (FIX: removed duplicate)
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     start_server()
