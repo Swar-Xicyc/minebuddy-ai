@@ -165,10 +165,16 @@ COMMANDS = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 ITEM_ALIASES = {
-    # Weapons & tools
-    "sword":    "wooden_sword",    "pickaxe":  "wooden_pickaxe",
-    "axe":      "wooden_axe",      "shovel":   "wooden_shovel",
-    "bow":      "bow",              "arrow":    "arrow",
+    # Weapons & tools — no material prefix, JS picks best available material
+    "sword":    "sword",           "pickaxe":  "pickaxe",
+    "axe":      "axe",             "shovel":   "shovel",
+    "hoe":      "hoe",             "bow":      "bow",
+    "arrow":    "arrow",           "crossbow":  "crossbow",
+    # Explicit material variants — user can ask for these specifically
+    "wooden sword":    "wooden_sword",    "stone sword":   "stone_sword",
+    "iron sword":      "iron_sword",      "diamond sword": "diamond_sword",
+    "wooden pickaxe":  "wooden_pickaxe",  "stone pickaxe": "stone_pickaxe",
+    "iron pickaxe":    "iron_pickaxe",    "diamond pickaxe":"diamond_pickaxe",
     # Blocks & materials
     "wood":     "oak_log",          "log":      "oak_log",
     "plank":    "oak_planks",       "planks":   "oak_planks",
@@ -187,9 +193,12 @@ ITEM_ALIASES = {
     "apple":    "apple",            "meat":     "cooked_beef",
     "beef":     "cooked_beef",      "steak":    "cooked_beef",
     "fish":     "cooked_cod",
-    # Armour
-    "helmet":     "diamond_helmet",     "chestplate": "diamond_chestplate",
-    "leggings":   "diamond_leggings",   "boots":      "diamond_boots",
+    # Armour — no material prefix, JS picks best available material
+    "helmet":     "helmet",         "chestplate": "chestplate",
+    "leggings":   "leggings",       "boots":      "boots",
+    # Explicit armour variants
+    "iron helmet":     "iron_helmet",     "diamond helmet":     "diamond_helmet",
+    "iron chestplate": "iron_chestplate", "diamond chestplate": "diamond_chestplate",
     # Misc
     "potion":   "potion",           "bucket":   "bucket",
     "water":    "water_bucket",     "book":     "book",
