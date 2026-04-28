@@ -1,0 +1,4 @@
+To run
+
+Launch minecraft - start a singleplayer world - open to LAN on port number 52779
+Run both scripts (index.js and NLP_part.py) in different terminals
